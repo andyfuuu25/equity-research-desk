@@ -1,0 +1,111 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Ink — layered navy-black surfaces */
+  --color-ink-950: #06090f;
+  --color-ink-900: #0a0e16;
+  --color-ink-800: #0f141f;
+  --color-ink-700: #161d2b;
+  --color-ink-600: #202a3c;
+
+  /* Hairlines and rules */
+  --color-line: #1c2534;
+  --color-line-strong: #2a3548;
+
+  /* Text hierarchy */
+  --color-paper: #e8ebf0;
+  --color-paper-dim: #9aa4b5;
+  --color-paper-mute: #5d6878;
+
+  /* Semantic */
+  --color-gain: #3ddc97;
+  --color-gain-dim: #1f7a55;
+  --color-loss: #ff6b6b;
+  --color-loss-dim: #8f3a3a;
+  --color-gold: #c9a24b;
+  --color-gold-dim: #8a7034;
+
+  /* Chart series — validated for CVD separation & contrast on both surfaces */
+  --color-series-stock: #bf8a1d;
+  --color-series-spy: #5b8fd6;
+
+  /* Type */
+  --font-display: Georgia, 'Times New Roman', 'Songti SC', serif;
+  --font-sans: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+}
+
+/* Light theme — ivory research-note palette. All Tailwind utilities reference
+   these variables, so overriding them re-themes every component. */
+html[data-theme='light'] {
+  --color-ink-950: #f4f5f8;
+  --color-ink-900: #ffffff;
+  --color-ink-800: #edeff4;
+  --color-ink-700: #e2e6ec;
+  --color-ink-600: #cfd6e0;
+
+  --color-line: #dde2ea;
+  --color-line-strong: #c2cbd8;
+
+  --color-paper: #1a2230;
+  --color-paper-dim: #46536a;
+  --color-paper-mute: #8a94a6;
+
+  --color-gain: #0e8a5f;
+  --color-gain-dim: #5cb890;
+  --color-loss: #c23a3a;
+  --color-loss-dim: #d98c8c;
+  --color-gold: #8a6b25;
+  --color-gold-dim: #bfa050;
+
+  --color-series-stock: #a8720d;
+  --color-series-spy: #3a6fb0;
+}
+
+html {
+  background: var(--color-ink-950);
+  color: var(--color-paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* Financial figures always align in columns */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle top glow used on the report masthead */
+.masthead-rule {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-gold) 30%,
+    var(--color-gold) 70%,
+    transparent
+  );
+  height: 1px;
+  opacity: 0.65;
+}
+
+@keyframes shimmer {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
+
+.skeleton {
+  animation: shimmer 1.6s ease-in-out infinite;
+  background: var(--color-ink-700);
+  border-radius: 4px;
+}

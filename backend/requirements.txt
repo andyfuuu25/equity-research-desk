@@ -1,0 +1,12 @@
+# Floors, not pins — the old exact pins predated Python 3.14 (pydantic 2.9
+# has no cp314 wheel and fails to build from source without a Rust toolchain).
+fastapi>=0.115.0
+uvicorn>=0.30.6
+pydantic>=2.12.0
+yfinance>=0.2.54
+google-genai>=2.5.0
+python-dotenv>=1.0.0
+requests>=2.32.0
+numpy>=1.26.0
+pandas>=2.2.0
+statsmodels>=0.14.0

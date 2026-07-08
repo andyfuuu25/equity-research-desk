@@ -1,0 +1,20 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--app-dir", "backend", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": [
+        "/c",
+        "set \"PATH=C:\\Program Files\\nodejs;%PATH%\" && node frontend\\node_modules\\next\\dist\\bin\\next dev frontend"
+      ],
+      "port": 3000
+    }
+  ]
+}
