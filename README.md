@@ -39,6 +39,9 @@ the dark and light themes.
   regenerated once on failure before accepting a best-effort parse.
 - **Parallel data pipeline** — all market-data fetches, the quant model, and
   the LLM call run concurrently; typical report time is 8–15 seconds.
+- **Deduplicated fetching** — one `.info` lookup and one price-history pair
+  per report feed the profile, metrics, quote, chart, performance table, and
+  quant model, minimizing rate-limit exposure on the keyless data source.
 - **Quota-safe validation** — invalid tickers are rejected by one cheap lookup
   before any rate-limited API is touched.
 
@@ -52,25 +55,33 @@ independent, academically-grounded measures of a company into a single
 
 ### What the number means
 
-Each of the five factors is scored **0–100 against a fixed "strong company"
-benchmark** — not against other stocks. A factor scores 100 when it hits a
-level a professional would consider excellent in absolute terms, and 0 when
-it hits a level considered poor. The composite is the sector-weighted average
-of those five factor scores.
+Each factor is scored **0–100 as a percentile rank against the S&P 500** —
+the same way institutional factor shops (AQR-style) score stocks. A factor
+score of 87 means *"this company ranks higher than ~87% of its sector peers
+in the S&P 500 on this measure."* The composite is the sector-weighted
+average of those five percentile ranks, and every factor shows its
+percentile right on the report (e.g. *"Gross Profitability: 91st pctile"*).
 
-> **Important:** This is an *absolute* score against fixed thresholds, **not
-> a percentile rank**. A 78 does **not** mean "better than 78% of stocks." It
-> means "this company's factor profile is 78% of the way to an idealized
-> strong profile." Two stocks with the same score can look very different.
+Ranking details:
+
+- Stocks are ranked against their **own sector cohort** (e.g. the ~80
+  Technology names in the index); small sectors fall back to the full index.
+  The report always states the exact benchmark used.
+- "Lower is better" factors (accruals, volatility) are inverted so **100 is
+  always good**.
+- The ranking universe comes from a **local factor snapshot** of the S&P 500
+  built by `backend/build_universe.py` (see below). If the snapshot is
+  missing or more than 30 days old, the model falls back to fixed reference
+  thresholds and says so in the methodology line on the report.
 
 A rough reading guide:
 
 | Score | Reading |
 |---|---|
-| **75–100** | Strong across most factors — cheap, profitable, steady, clean earnings |
-| **50–74** | Solid but mixed — some factors strong, others middling |
-| **25–49** | Weak on most factors — expensive, unprofitable, volatile, or negative momentum |
-| **0–24** | Poor across the board on this model's measures |
+| **75–100** | Top quartile of its sector on the weighted factor mix |
+| **50–74** | Above the sector median — solid but not elite |
+| **25–49** | Below the sector median on most weighted factors |
+| **0–24** | Bottom quartile — expensive, weak, volatile, or dirty earnings vs. peers |
 
 The score is a **research starting point, not a buy/sell signal.** It looks
 only at the five factors below and is blind to everything else (management,
@@ -80,11 +91,11 @@ industry disruption, macro, valuation nuance, one-off events).
 
 | Factor | In plain English | Scores high when… | Grounded in |
 |---|---|---|---|
-| **Earnings Yield** (EBIT/EV) | How much operating profit you get for the company's total price (debt included). The inverse of a P/E-style multiple. | The company is **cheap** relative to its profits (≈15%+ earns full marks) | Greenblatt, *Magic Formula* |
-| **12-1 Momentum** | The stock's price trend over the past year, ignoring the most recent month (which tends to reverse). | The stock has been **trending up** (≈+40% earns full marks; −20% scores zero) | Jegadeesh & Titman (1993) |
-| **Gross Profitability** (GP/Assets) | How much gross profit the company squeezes from its asset base — a clean measure of business quality. | The company is **highly productive** with its assets (≈0.60+ earns full marks) | Novy-Marx (2013) |
-| **Accruals** (Sloan) | How much of reported earnings is backed by **actual cash** vs. accounting estimates. *Lower is better.* | Earnings are **backed by cash flow**, not paper gains (a warning fires if income runs far ahead of cash) | Sloan (1996) |
-| **Idiosyncratic Volatility** | How jumpy the stock is beyond what the broad market explains — a risk measure. *Lower is better.* | The stock is **steady** (≈10% annualized earns full marks; 40%+ scores zero) | Ang, Hodrick, Xing & Zhang (2006) |
+| **Earnings Yield** (EBIT/EV) | How much operating profit you get for the company's total price (debt included). The inverse of a P/E-style multiple. | The company is **cheaper** relative to its profits than its sector peers | Greenblatt, *Magic Formula* |
+| **12-1 Momentum** | The stock's price trend over the past year, ignoring the most recent month (which tends to reverse). | The stock has been **trending up harder** than its sector peers | Jegadeesh & Titman (1993) |
+| **Gross Profitability** (GP/Assets) | How much gross profit the company squeezes from its asset base — a clean measure of business quality. | The company is **more productive** with its assets than its sector peers | Novy-Marx (2013) |
+| **Accruals** (Sloan) | How much of reported earnings is backed by **actual cash** vs. accounting estimates. *Lower is better.* | Earnings are **better backed by cash flow** than peers' (a warning fires if income runs far ahead of cash) | Sloan (1996) |
+| **Idiosyncratic Volatility** | How jumpy the stock is beyond what the broad market explains — a risk measure. *Lower is better.* | The stock is **steadier** than its sector peers | Ang, Hodrick, Xing & Zhang (2006) |
 
 ### Why the weights shift by sector
 
@@ -113,6 +124,32 @@ accounting), the badge switches from **PASSED** to **FLAGGED**, the composite
 is **capped at 40**, and a warning explains why. This is a caution, not an
 accusation — it's exactly the kind of thing a careful analyst double-checks.
 
+### Building the ranking universe
+
+Percentile ranking needs a local factor snapshot of the S&P 500:
+
+```bash
+cd backend
+python build_universe.py        # ~3-5 minutes, free yfinance data only
+```
+
+This computes the five factors for all ~503 constituents (two bulk price
+downloads + per-ticker fundamentals) and writes `universe_snapshot.json`.
+Notes:
+
+- **Refresh cadence:** run it whenever you like — daily is ideal, weekly is
+  fine. Snapshots older than **30 days** are ignored and the model falls
+  back to fixed-threshold scoring (clearly stated on the report).
+- **Automate it (optional):** on Windows, Task Scheduler → "Create Basic
+  Task" → nightly → `python C:\path\to\backend\build_universe.py`.
+- **Rate limits:** yfinance may throttle a full run; the builder retries
+  missing names after a cooldown and backfills still-missing fundamentals
+  from the previous snapshot (annual statements barely move between runs),
+  so coverage only improves.
+- The constituent list ships with the repo
+  (`backend/sp500_constituents.json`, sourced from Wikipedia); the snapshot
+  itself is generated locally and git-ignored.
+
 ---
 
 ## Architecture
@@ -126,11 +163,14 @@ accusation — it's exactly the kind of thing a careful analyst double-checks.
     ▼
 [FastAPI backend]      :8000
     │
-    ├─► Data layer (parallel)
+    ├─► Data layer (parallel; one .info lookup + one price-history
+    │   │            pair shared across every consumer)
     │     ├─ yfinance ─────── fundamentals, calendar, price history
     │     ├─ Alpha Vantage ── news + sentiment  (optional key)
     │     │     └─ fallback: Yahoo Finance headlines (no key)
-    │     └─ Quant model ──── 5-factor institutional evaluator
+    │     └─ Quant model ──── 5-factor evaluator, percentile-ranked
+    │           └─ universe_snapshot.json (S&P 500 factor snapshot,
+    │              built offline by build_universe.py)
     │
     └─► LLM layer
           └─ Gemini (single merged call → Sections 1 & 2,
@@ -229,6 +269,8 @@ Vantage request**.
 {
   "ticker": "NVDA",
   "generated_at": "2026-07-08T21:30:00+00:00",
+  "quote": { "price": 204.12, "change": 7.19, "change_pct": 3.65 },
+  "chart": { "points": [ { "date": "2025-07-09", "close": 159.34, "spy": 620.45 } ] },  // ~252 daily closes
   "executive_summary": { "company": "...", "sector": "...", "industry": "...", "body": "..." },
   "future_pipeline":   { "earnings_date": "2026-08-27", "body": "..." },
   "evaluation": {
@@ -236,6 +278,8 @@ Vantage request**.
     "quant": {
       "status": "PASSED",          // or FLAGGED (earnings-quality warning, score capped) / FAILED
       "composite_score": 78,
+      "factor_percentiles": { },   // per-factor sector percentile ranks (percentile mode only)
+      "benchmark": "...",          // ranking cohort + snapshot date (percentile mode only)
       "flags": [],                 // data-quality warnings (missing factors, fallbacks)
       "methodology": "...",        // scoring disclosure shown in the UI
       "raw_metrics": { }
@@ -259,7 +303,10 @@ Errors: `400` invalid ticker format · `404` unknown ticker ·
 │  ├─ main.py                  # FastAPI app — parallel report orchestration
 │  ├─ data.py                  # Data aggregation (yfinance, Alpha Vantage, fallback)
 │  ├─ llm.py                   # Prompting, validation/retry, model fallback
-│  ├─ evaluator.py             # 5-factor institutional quant model
+│  ├─ evaluator.py             # 5-factor quant model (sector percentile ranking)
+│  ├─ universe.py              # Snapshot loading + percentile math
+│  ├─ build_universe.py        # S&P 500 factor snapshot builder (run nightly)
+│  ├─ sp500_constituents.json  # Bundled index constituent list
 │  └─ .env.example             # Key template (real .env is git-ignored)
 └─ frontend/
    ├─ app/                     # Next.js App Router (landing + /report/[ticker])

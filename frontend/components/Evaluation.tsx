@@ -31,10 +31,30 @@ interface QuantResult {
   composite_score?: number;
   allocation_weights?: Record<string, number>;
   raw_metrics?: Record<string, number | string>;
+  factor_percentiles?: Record<string, number>;
+  benchmark?: string;
   flags?: string[];
   methodology?: string;
   reason?: string;
 }
+
+/** 1 -> "1st", 82 -> "82nd", etc. */
+function ordinal(n: number) {
+  const rem10 = n % 10;
+  const rem100 = n % 100;
+  if (rem10 === 1 && rem100 !== 11) return `${n}st`;
+  if (rem10 === 2 && rem100 !== 12) return `${n}nd`;
+  if (rem10 === 3 && rem100 !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
+const FACTOR_SOURCES: Record<string, string> = {
+  "Earnings Yield (EBIT/EV)": "Greenblatt",
+  "12-1 Trailing Momentum": "Jegadeesh & Titman 1993",
+  "Gross Profitability (GP/Assets)": "Novy-Marx 2013",
+  "Accruals Ratio (Sloan)": "Sloan 1996",
+  "Idiosyncratic Volatility (Annualized)": "Ang et al. 2006",
+};
 
 interface EvaluationData {
   metrics: EvaluationMetrics;
@@ -162,22 +182,37 @@ function QuantBadge({ quant }: { quant: QuantResult }) {
 
       {quant.raw_metrics && (
         <div className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 sm:grid-cols-5">
-          {Object.entries(quant.raw_metrics).map(([key, val]) => (
-            <div key={key}>
-              <p className="text-[10px] uppercase leading-tight tracking-wider text-paper-mute">
-                {key
-                  .replace(" (EBIT/EV)", "")
-                  .replace(" (GP/Assets)", "")
-                  .replace(" (Annualized)", "")}
-              </p>
-              <p className="tnum mt-1 font-mono text-sm text-paper">{val}</p>
-            </div>
-          ))}
+          {Object.entries(quant.raw_metrics).map(([key, val]) => {
+            const pct = quant.factor_percentiles?.[key];
+            return (
+              <div key={key} title={FACTOR_SOURCES[key]}>
+                <p className="text-[10px] uppercase leading-tight tracking-wider text-paper-mute">
+                  {key
+                    .replace(" (EBIT/EV)", "")
+                    .replace(" (GP/Assets)", "")
+                    .replace(" (Annualized)", "")}
+                </p>
+                <p className="tnum mt-1 font-mono text-sm text-paper">{val}</p>
+                {pct !== undefined && (
+                  <p className="tnum mt-0.5 font-mono text-[11px] font-semibold text-gold">
+                    {ordinal(pct)} pctile
+                  </p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
+      {quant.benchmark && (
+        <p className="mt-3 text-[11px] leading-relaxed text-paper-dim">
+          Percentiles vs. {quant.benchmark} (100 = best). Factor pedigree:{" "}
+          {Object.values(FACTOR_SOURCES).join(" · ")}.
+        </p>
+      )}
+
       {quant.methodology && (
-        <p className="mt-3 text-[11px] leading-relaxed text-paper-mute">
+        <p className="mt-2 text-[11px] leading-relaxed text-paper-mute">
           {quant.methodology}
         </p>
       )}
