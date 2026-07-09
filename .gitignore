@@ -223,3 +223,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Generated factor-universe snapshot (rebuilt by backend/build_universe.py)
+backend/universe_snapshot.json

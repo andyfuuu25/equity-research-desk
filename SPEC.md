@@ -482,4 +482,35 @@ unanimous verdict) drove the following corrections to `evaluator.py`:
 **Backlog (council-recommended upgrade):** replace fixed anchors with
 cross-sectional percentile ranks against a cached S&P 500 factor snapshot
 (nightly yfinance pull), displayed as "Xth percentile vs. sector" with
-academic citations.
+academic citations. *Implemented in v0.4 — see below.*
+
+## Addendum — Cross-sectional percentile ranking (v0.4, 2026-07-09)
+
+The council's remaining recommendation is implemented:
+
+1. **Factor snapshot** (`build_universe.py`). Computes the same five factors
+   for all ~503 S&P 500 constituents: two bulk price downloads (momentum,
+   idiosyncratic vol) plus threaded per-ticker fundamentals mirroring the
+   evaluator's rules (NI/MktCap fallback for banks). Writes
+   `universe_snapshot.json` (git-ignored). Resilient to yfinance throttling:
+   cooldown retry pass + backfill of still-missing fundamentals from the
+   previous snapshot. Constituents bundled in `sp500_constituents.json`
+   (Wikipedia-sourced, GICS→yfinance sector mapping for fallback).
+2. **Percentile scoring** (`universe.py` + `evaluator.py`). With a fresh
+   snapshot (≤30 days), each factor is scored as a midrank percentile
+   against the stock's yfinance-sector cohort (min 20 names, else full
+   index). Lower-is-better factors (accruals, idio vol) are inverted so 100
+   is always good. The composite is the renormalized sector-weighted blend
+   of percentiles; the FLAGGED accruals cap still applies. Missing/stale
+   snapshot → fixed-threshold fallback, stated in the `methodology` string.
+3. **API additions**: `factor_percentiles` (display-key → 0-100 rank) and
+   `benchmark` (cohort description with snapshot date), only present in
+   percentile mode.
+4. **UI**: each factor cell shows "Nth pctile" under the raw value, with a
+   benchmark caption and factor pedigree line (Greenblatt · Jegadeesh &
+   Titman 1993 · Novy-Marx 2013 · Sloan 1996 · Ang et al. 2006).
+
+Known limits (disclosed by design): yfinance snapshots are not
+point-in-time and carry survivorship bias; fundamentals mix statement dates
+across the universe. Acceptable for a research tool; noted here rather than
+hidden.

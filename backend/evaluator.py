@@ -3,6 +3,8 @@ import pandas as pd
 import statsmodels.api as sm
 import yfinance as yf
 
+import universe
+
 
 class InstitutionalStockEvaluator:
 
@@ -164,8 +166,6 @@ class InstitutionalStockEvaluator:
         weights = config["weights"]
         regime_label = config["label"]
 
-        # Composite over available factors only; weights renormalize so a
-        # missing factor never silently drags the score.
         factor_scores = {
             "ey": ey_score,
             "mom": mom_score,
@@ -173,6 +173,42 @@ class InstitutionalStockEvaluator:
             "accruals": acc_score,
             "idio_vol": idio_score,
         }
+
+        # Preferred scoring: sector-relative percentile ranks against the
+        # S&P 500 factor snapshot (how factor models actually rank stocks).
+        # Falls back to the fixed-threshold scores above when the snapshot
+        # is missing or stale. Anchor scores fill rare percentile gaps
+        # (e.g. negative-EV maximal) so an existing flag isn't lost.
+        raw_factors = {
+            "ey": earnings_yield,
+            "mom": momentum_12_1,
+            "gp": gross_profitability,
+            "accruals": accruals_ratio,
+            "idio_vol": idiosyncratic_vol,
+        }
+        snapshot, _snapshot_age = universe.load_snapshot()
+        percentiles = None
+        benchmark = None
+        if snapshot:
+            percentiles, benchmark = universe.rank_factors(raw_factors, sector, snapshot)
+            factor_scores = {
+                k: (percentiles[k] if percentiles[k] is not None else factor_scores[k])
+                for k in factor_scores
+            }
+            methodology = (
+                f"Factors scored as percentile ranks vs. the {benchmark} "
+                "(100 = best; accruals and volatility inverted: lower raw values rank higher). "
+                "Accruals follow Sloan (1996)."
+            )
+        else:
+            methodology = (
+                "Factors scored against fixed reference thresholds, not peer-ranked "
+                "(no fresh S&P 500 snapshot; run build_universe.py to enable percentile ranking). "
+                "Accruals follow Sloan (1996): lower is better."
+            )
+
+        # Composite over available factors only; weights renormalize so a
+        # missing factor never silently drags the score.
         scored = {k: v for k, v in factor_scores.items() if v is not None and weights[k] > 0}
         weight_sum = sum(weights[k] for k in scored)
         if not scored or weight_sum == 0:
@@ -193,22 +229,32 @@ class InstitutionalStockEvaluator:
         def _fmt(v):
             return round(v, 4) if v is not None else "N/A"
 
-        return {
+        display_keys = {
+            "ey": "Earnings Yield (EBIT/EV)",
+            "mom": "12-1 Trailing Momentum",
+            "gp": "Gross Profitability (GP/Assets)",
+            "accruals": "Accruals Ratio (Sloan)",
+            "idio_vol": "Idiosyncratic Volatility (Annualized)",
+        }
+        result = {
             "status": status,
             "sector": sector,
             "regime_applied": regime_label,
             "composite_score": round(weighted_score, 2),
             "allocation_weights": weights,
             "flags": flags,
-            "methodology": (
-                "Factors scored against fixed reference thresholds, not peer-ranked. "
-                "Accruals follow Sloan (1996): lower is better."
-            ),
+            "methodology": methodology,
             "raw_metrics": {
-                "Earnings Yield (EBIT/EV)": _fmt(earnings_yield),
-                "12-1 Trailing Momentum": _fmt(momentum_12_1),
-                "Gross Profitability (GP/Assets)": _fmt(gross_profitability),
-                "Accruals Ratio (Sloan)": _fmt(accruals_ratio),
-                "Idiosyncratic Volatility (Annualized)": _fmt(idiosyncratic_vol),
+                display_keys["ey"]: _fmt(earnings_yield),
+                display_keys["mom"]: _fmt(momentum_12_1),
+                display_keys["gp"]: _fmt(gross_profitability),
+                display_keys["accruals"]: _fmt(accruals_ratio),
+                display_keys["idio_vol"]: _fmt(idiosyncratic_vol),
             },
         }
+        if percentiles is not None:
+            result["benchmark"] = benchmark
+            result["factor_percentiles"] = {
+                display_keys[k]: round(v) for k, v in percentiles.items() if v is not None
+            }
+        return result
