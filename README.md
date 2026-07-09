@@ -17,7 +17,7 @@ evaluation — built entirely on free data sources and free-tier APIs.
 |---|---|---|
 | **Executive Summary** | Three-paragraph plain-English profile: what the business does, how it makes money, and its competitive character | Yahoo Finance fundamentals + LLM |
 | **Future Pipeline** | Forward catalysts classified into *Confirmed Catalysts*, *Developing Stories*, and *Risk Events*, plus the next earnings date | Alpha Vantage news (with keyless Yahoo Finance fallback) + LLM |
-| **Evaluation** | Five-factor institutional quant score (0–100) with sector-adaptive weights, valuation ratios, growth metrics, price performance vs. S&P 500, and analyst consensus | Yahoo Finance + in-house quant model (no LLM) |
+| **Evaluation** | Five-factor quant score (0–100) built on the academic factor literature — EBIT/EV (Greenblatt), 12-1 momentum, gross profitability (Novy-Marx), Sloan accruals, idiosyncratic volatility — with sector-adaptive weights, plus valuation ratios, growth metrics, price performance vs. S&P 500, and analyst consensus | Yahoo Finance + in-house quant model (no LLM) |
 
 The report masthead shows the **live share price with day change**, and an
 **interactive 1-year price chart** sits above the sections — range toggles
@@ -41,6 +41,77 @@ the dark and light themes.
   the LLM call run concurrently; typical report time is 8–15 seconds.
 - **Quota-safe validation** — invalid tickers are rejected by one cheap lookup
   before any rate-limited API is touched.
+
+---
+
+## Understanding the Quant Score
+
+The **Evaluation** section is the heart of the report. It distills five
+independent, academically-grounded measures of a company into a single
+**0–100 composite score**. Here's how to read it.
+
+### What the number means
+
+Each of the five factors is scored **0–100 against a fixed "strong company"
+benchmark** — not against other stocks. A factor scores 100 when it hits a
+level a professional would consider excellent in absolute terms, and 0 when
+it hits a level considered poor. The composite is the sector-weighted average
+of those five factor scores.
+
+> **Important:** This is an *absolute* score against fixed thresholds, **not
+> a percentile rank**. A 78 does **not** mean "better than 78% of stocks." It
+> means "this company's factor profile is 78% of the way to an idealized
+> strong profile." Two stocks with the same score can look very different.
+
+A rough reading guide:
+
+| Score | Reading |
+|---|---|
+| **75–100** | Strong across most factors — cheap, profitable, steady, clean earnings |
+| **50–74** | Solid but mixed — some factors strong, others middling |
+| **25–49** | Weak on most factors — expensive, unprofitable, volatile, or negative momentum |
+| **0–24** | Poor across the board on this model's measures |
+
+The score is a **research starting point, not a buy/sell signal.** It looks
+only at the five factors below and is blind to everything else (management,
+industry disruption, macro, valuation nuance, one-off events).
+
+### What each factor measures
+
+| Factor | In plain English | Scores high when… | Grounded in |
+|---|---|---|---|
+| **Earnings Yield** (EBIT/EV) | How much operating profit you get for the company's total price (debt included). The inverse of a P/E-style multiple. | The company is **cheap** relative to its profits (≈15%+ earns full marks) | Greenblatt, *Magic Formula* |
+| **12-1 Momentum** | The stock's price trend over the past year, ignoring the most recent month (which tends to reverse). | The stock has been **trending up** (≈+40% earns full marks; −20% scores zero) | Jegadeesh & Titman (1993) |
+| **Gross Profitability** (GP/Assets) | How much gross profit the company squeezes from its asset base — a clean measure of business quality. | The company is **highly productive** with its assets (≈0.60+ earns full marks) | Novy-Marx (2013) |
+| **Accruals** (Sloan) | How much of reported earnings is backed by **actual cash** vs. accounting estimates. *Lower is better.* | Earnings are **backed by cash flow**, not paper gains (a warning fires if income runs far ahead of cash) | Sloan (1996) |
+| **Idiosyncratic Volatility** | How jumpy the stock is beyond what the broad market explains — a risk measure. *Lower is better.* | The stock is **steady** (≈10% annualized earns full marks; 40%+ scores zero) | Ang, Hodrick, Xing & Zhang (2006) |
+
+### Why the weights shift by sector
+
+The five factors don't matter equally in every industry, so the model
+**re-weights them by sector**. A high-growth software company is judged more
+on profitability and momentum; a utility is judged more on cheapness and
+earnings quality. For example:
+
+| Sector | Leans most on | Rationale |
+|---|---|---|
+| **Technology** | Gross profitability, momentum | Growth and asset efficiency drive returns |
+| **Utilities** | Earnings yield, accruals | Regulated, capital-heavy — value and clean books matter |
+| **Financial Services** | Earnings yield, momentum | Gross profit isn't meaningful for banks (weighted to zero) |
+| **Healthcare** | Momentum, volatility | Pipeline/catalyst-driven, higher dispersion |
+
+If a factor can't be computed (e.g. a young company with under ~11 months of
+price history, or a bank that reports no gross profit), it's **dropped and
+the remaining weights rescale** — the score is never silently dragged down by
+missing data. Any such adjustment is shown as a ⚠ flag on the report.
+
+### The earnings-quality flag
+
+If a company's reported income runs **far ahead of the cash it actually
+generated** (high Sloan accruals — a classic red flag for aggressive
+accounting), the badge switches from **PASSED** to **FLAGGED**, the composite
+is **capped at 40**, and a warning explains why. This is a caution, not an
+accusation — it's exactly the kind of thing a careful analyst double-checks.
 
 ---
 
@@ -162,7 +233,13 @@ Vantage request**.
   "future_pipeline":   { "earnings_date": "2026-08-27", "body": "..." },
   "evaluation": {
     "metrics": { "trailing_pe": "...", "price_1w": "...", "...": "..." },
-    "quant":   { "status": "PASSED", "composite_score": 78, "raw_metrics": { } }
+    "quant": {
+      "status": "PASSED",          // or FLAGGED (earnings-quality warning, score capped) / FAILED
+      "composite_score": 78,
+      "flags": [],                 // data-quality warnings (missing factors, fallbacks)
+      "methodology": "...",        // scoring disclosure shown in the UI
+      "raw_metrics": { }
+    }
   }
 }
 ```

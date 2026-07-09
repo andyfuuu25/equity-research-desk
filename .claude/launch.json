@@ -12,9 +12,20 @@
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": [
         "/c",
-        "set \"PATH=C:\\Program Files\\nodejs;%PATH%\" && node frontend\\node_modules\\next\\dist\\bin\\next dev frontend"
+        "set \"PATH=C:\\Program Files\\nodejs;%PATH%\" && node frontend\\node_modules\\next\\dist\\bin\\next dev frontend -p %PORT%"
       ],
-      "port": 3000
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "frontend-prod",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": [
+        "/c",
+        "set \"PATH=C:\\Program Files\\nodejs;%PATH%\" && node frontend\\node_modules\\next\\dist\\bin\\next start frontend -p %PORT%"
+      ],
+      "port": 3100,
+      "autoPort": true
     }
   ]
 }

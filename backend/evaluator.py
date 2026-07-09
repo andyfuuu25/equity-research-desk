@@ -29,8 +29,9 @@ class InstitutionalStockEvaluator:
                 "weights": {"ey": 0.35, "mom": 0.15, "gp": 0.25, "accruals": 0.10, "idio_vol": 0.15},
                 "label": "Cyclical / Capital Efficiency Focus",
             },
+            # gp weight is 0: gross profit is not meaningful for banks/insurers
             "Financial Services": {
-                "weights": {"ey": 0.30, "mom": 0.30, "gp": 0.10, "accruals": 0.10, "idio_vol": 0.20},
+                "weights": {"ey": 0.35, "mom": 0.30, "gp": 0.00, "accruals": 0.15, "idio_vol": 0.20},
                 "label": "Spread-Income / Momentum Alpha",
             },
         }
@@ -52,7 +53,8 @@ class InstitutionalStockEvaluator:
         try:
             info = ticker.info
             sector = info.get("sector", "Unknown")
-            ev = info.get("enterpriseValue") or info.get("marketCap")
+            market_cap = info.get("marketCap")
+            ev = info.get("enterpriseValue") or market_cap
         except Exception as e:
             return {"status": "FAILED", "reason": f"API Ingestion Error: {str(e)}"}
 
@@ -72,10 +74,11 @@ class InstitutionalStockEvaluator:
             ["Operating Cash Flow", "Cash Flow From Operating Activities", "CashFlowFromOperatingActivities"],
         )
 
+        # EBIT and Gross Profit are optional (banks/insurers don't report
+        # them); their factors are excluded and weights renormalize.
         missing_fields = [
             k for k, v in {
-                "EBIT": ebit, "Gross Profit": gross_profit, "Net Income": net_income,
-                "Total Assets": total_assets, "CFO": cfo, "EV": ev,
+                "Net Income": net_income, "Total Assets": total_assets, "CFO": cfo,
             }.items() if v is None
         ]
         if missing_fields:
@@ -91,15 +94,59 @@ class InstitutionalStockEvaluator:
         except Exception as e:
             return {"status": "FAILED", "reason": f"Historical pricing failure: {str(e)}"}
 
-        earnings_yield = ebit / ev if ev > 0 else 0
+        flags = []
 
-        if len(hist_stock) > 22:
-            momentum_12_1 = (hist_stock.iloc[-22] / hist_stock.iloc[0]) - 1
+        # Earnings yield (Greenblatt). Negative EV means cash exceeds market
+        # cap — the cheapest configuration possible, not a data failure.
+        # Banks report no EBIT, so fall back to NI / market cap there.
+        if ebit is None and market_cap and market_cap > 0:
+            earnings_yield = net_income / market_cap
+            ey_score = float(np.clip(earnings_yield / 0.15, 0, 1) * 100)
+            flags.append(
+                "EBIT not reported (typical for financials): earnings yield computed as net income / market cap."
+            )
+        elif ebit is not None and ev and ev > 0:
+            earnings_yield = ebit / ev
+            ey_score = float(np.clip(earnings_yield / 0.15, 0, 1) * 100)
+        elif ebit is not None and ebit > 0:
+            earnings_yield = None
+            ey_score = 100.0
+            flags.append(
+                "Negative enterprise value (cash exceeds market cap): earnings yield scored maximal."
+            )
         else:
-            momentum_12_1 = 0
+            earnings_yield = None
+            ey_score = None
+            flags.append("Earnings yield unscorable: factor excluded and weights renormalized.")
 
-        gross_profitability = gross_profit / total_assets
-        accruals_ratio = (cfo - net_income) / total_assets
+        # 12-1 momentum (Jegadeesh-Titman): the ~11-month return from t-12m to
+        # t-1m. A short window is a different factor, so score N/A instead.
+        if len(hist_stock) >= 230:
+            momentum_12_1 = (hist_stock.iloc[-22] / hist_stock.iloc[0]) - 1
+            mom_score = float(np.clip((momentum_12_1 + 0.2) / 0.6, 0, 1) * 100)
+        else:
+            momentum_12_1 = None
+            mom_score = None
+            flags.append(
+                "Momentum N/A: fewer than 230 trading days of history; factor excluded and weights renormalized."
+            )
+
+        if gross_profit is not None:
+            gross_profitability = gross_profit / total_assets
+            gp_score = float(np.clip(gross_profitability / 0.6, 0, 1) * 100)
+        else:
+            gross_profitability = None
+            gp_score = None
+            config_gp = self.sector_matrix.get(sector, self.base_weights)["weights"]["gp"]
+            if config_gp > 0:
+                flags.append(
+                    "Gross profit not reported: profitability factor excluded and weights renormalized."
+                )
+
+        # Accruals per Sloan (1996): (NI - CFO) / assets. High accruals mean
+        # earnings are not backed by cash and predict underperformance.
+        accruals_ratio = (net_income - cfo) / total_assets
+        acc_score = float(np.clip((0.15 - accruals_ratio) / 0.2, 0, 1) * 100)
 
         try:
             Y = combined_returns["Stock"]
@@ -108,50 +155,60 @@ class InstitutionalStockEvaluator:
             idiosyncratic_vol = np.sqrt(ols_model.ssr / (len(Y) - 2)) * np.sqrt(252)
         except Exception:
             idiosyncratic_vol = combined_returns["Stock"].std() * np.sqrt(252)
-
-        if accruals_ratio > 0.15:
-            return {
-                "status": "REJECTED",
-                "sector": sector,
-                "reason": f"Failed Accruals Hygiene Gatekeeper. Accruals Ratio of {accruals_ratio:.4f} exceeds threshold (+0.15). Earnings quality compromised.",
-                "raw_metrics": {
-                    "Earnings Yield (EBIT/EV)": round(earnings_yield, 4),
-                    "12-1 Trailing Momentum": round(momentum_12_1, 4),
-                    "Gross Profitability (GP/Assets)": round(gross_profitability, 4),
-                    "Accruals Ratio": round(accruals_ratio, 4),
-                    "Idiosyncratic Volatility (Annualized)": round(idiosyncratic_vol, 4),
-                },
-            }
+            flags.append(
+                "Market-model regression unavailable: total volatility substituted for idiosyncratic volatility (conservative)."
+            )
+        idio_score = float(np.clip((0.40 - idiosyncratic_vol) / 0.30, 0, 1) * 100)
 
         config = self.sector_matrix.get(sector, self.base_weights)
         weights = config["weights"]
         regime_label = config["label"]
 
-        ey_score = np.clip(earnings_yield / 0.15, 0, 1) * 100
-        mom_score = np.clip((momentum_12_1 + 0.2) / 0.6, 0, 1) * 100
-        gp_score = np.clip(gross_profitability / 0.6, 0, 1) * 100
-        acc_score = np.clip((0.15 - accruals_ratio) / 0.2, 0, 1) * 100
-        idio_score = np.clip((0.40 - idiosyncratic_vol) / 0.30, 0, 1) * 100
+        # Composite over available factors only; weights renormalize so a
+        # missing factor never silently drags the score.
+        factor_scores = {
+            "ey": ey_score,
+            "mom": mom_score,
+            "gp": gp_score,
+            "accruals": acc_score,
+            "idio_vol": idio_score,
+        }
+        scored = {k: v for k, v in factor_scores.items() if v is not None and weights[k] > 0}
+        weight_sum = sum(weights[k] for k in scored)
+        if not scored or weight_sum == 0:
+            return {"status": "FAILED", "reason": "No scorable factors for this ticker."}
+        weighted_score = sum(weights[k] * v for k, v in scored.items()) / weight_sum
 
-        weighted_score = (
-            weights["ey"] * ey_score
-            + weights["mom"] * mom_score
-            + weights["gp"] * gp_score
-            + weights["accruals"] * acc_score
-            + weights["idio_vol"] * idio_score
-        )
+        # High-accruals warning (Sloan's effect is a tilt, not a veto):
+        # cap the composite and surface the flag instead of rejecting.
+        status = "PASSED"
+        if accruals_ratio > 0.15:
+            status = "FLAGGED"
+            weighted_score = min(weighted_score, 40.0)
+            flags.append(
+                f"Earnings-quality warning: accruals ratio {accruals_ratio:+.4f} — net income exceeds operating cash flow "
+                "by more than 15% of total assets (Sloan 1996). Composite capped at 40."
+            )
+
+        def _fmt(v):
+            return round(v, 4) if v is not None else "N/A"
 
         return {
-            "status": "PASSED",
+            "status": status,
             "sector": sector,
             "regime_applied": regime_label,
             "composite_score": round(weighted_score, 2),
             "allocation_weights": weights,
+            "flags": flags,
+            "methodology": (
+                "Factors scored against fixed reference thresholds, not peer-ranked. "
+                "Accruals follow Sloan (1996): lower is better."
+            ),
             "raw_metrics": {
-                "Earnings Yield (EBIT/EV)": round(earnings_yield, 4),
-                "12-1 Trailing Momentum": round(momentum_12_1, 4),
-                "Gross Profitability (GP/Assets)": round(gross_profitability, 4),
-                "Accruals Ratio": round(accruals_ratio, 4),
-                "Idiosyncratic Volatility (Annualized)": round(idiosyncratic_vol, 4),
+                "Earnings Yield (EBIT/EV)": _fmt(earnings_yield),
+                "12-1 Trailing Momentum": _fmt(momentum_12_1),
+                "Gross Profitability (GP/Assets)": _fmt(gross_profitability),
+                "Accruals Ratio (Sloan)": _fmt(accruals_ratio),
+                "Idiosyncratic Volatility (Annualized)": _fmt(idiosyncratic_vol),
             },
         }

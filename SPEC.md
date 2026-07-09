@@ -150,18 +150,21 @@ Risk Events:
 - News sentiment: aggregated from Alpha Vantage articles already fetched for Section 2 (no extra API call)
 
 **Quantitative model (`evaluator.py` — `InstitutionalStockEvaluator`):**
-- Scores the stock 0–100 using 5 factor pillars: Earnings Yield, 12-1 Trailing Momentum, Gross Profitability, Accruals Ratio, Idiosyncratic Volatility (OLS residual vs. S&P 500)
-- Sector-shifting weights: factor weights adjust based on detected GICS sector (6 sector configurations + base fallback)
-- Gatekeeper rule: hard-rejects if Accruals Ratio > 0.15 (earnings manipulation flag)
-- Returns: `status` (PASSED / REJECTED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`
+- Scores the stock 0–100 using 5 factor pillars: Earnings Yield (EBIT/EV, Greenblatt), 12-1 Trailing Momentum (Jegadeesh-Titman), Gross Profitability (GP/Assets, Novy-Marx 2013), Accruals Ratio ((NI − CFO)/Assets, Sloan 1996 — lower is better), Idiosyncratic Volatility (OLS residual vs. S&P 500)
+- Sector-shifting weights: factor weights adjust based on detected GICS sector (6 sector configurations + base fallback); Financial Services carries zero gross-profitability weight (banks report no gross profit)
+- Missing or unscorable factors (short price history, unreported EBIT/GP, negative EV) are excluded with a visible flag and the remaining weights renormalize — missing data is never silently scored
+- Banks/insurers without EBIT fall back to Net Income / Market Cap for earnings yield (flagged)
+- Earnings-quality warning: if Sloan accruals > +0.15 (net income far ahead of operating cash flow), status becomes FLAGGED and the composite is capped at 40 — a tilt with a warning banner, not a veto
+- Returns: `status` (PASSED / FLAGGED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`, `flags`, `methodology`
+- Scores use fixed reference thresholds (not peer-ranked percentiles); this is disclosed in the UI via the `methodology` string
 - Data fetched independently by the evaluator via yfinance (financials, balance sheet, cashflow, price history)
 
 **LLM task:** None — Section 3 does not use LLM generation. All output is derived directly from data.
 
 **Output format (rendered as structured UI, not LLM text):**
 ```
-[Quant score badge: PASSED score/100 | REJECTED reason | FAILED]
-[Factor metrics row: Earnings Yield | 12-1 Momentum | Gross Profitability | Accruals Ratio | Idio Vol]
+[Quant score badge: PASSED score/100 | FLAGGED capped score + warnings | FAILED]
+[Factor metrics row: Earnings Yield | 12-1 Momentum | Gross Profitability | Accruals (Sloan) | Idio Vol]
 
 Valuation:        P/E | P/S | EV/EBITDA | FCF Yield
 Growth:           Revenue Growth | Gross Margin | Net Margin | Debt/Equity
@@ -448,3 +451,35 @@ The following decisions supersede the sections above where they conflict:
    session-only), installs missing dependencies, and starts both servers.
 7. **Section 3 remains LLM-free**, rendered as structured UI (unchanged,
    reaffirmed).
+
+## Addendum — Quant model corrections (v0.3, 2026-07-09)
+
+A five-advisor council review of the evaluation math (peer-reviewed,
+unanimous verdict) drove the following corrections to `evaluator.py`:
+
+1. **Accruals sign flipped to Sloan (1996) convention.** The ratio was
+   previously computed as (CFO − NI)/Assets — the *negative* of Sloan's
+   measure — so the gatekeeper rejected high-quality cash converters and
+   perfect-scored accrual-inflated earnings. Now (NI − CFO)/Assets: high
+   accruals (income not backed by cash) score low, strong cash conversion
+   scores high.
+2. **Gatekeeper demoted from veto to flag.** Sloan's effect is a mild
+   decile tilt and yfinance CFO fields are noisy, so a hard REJECT was
+   unjustifiable. High accruals (> +0.15) now return `status: "FLAGGED"`
+   with the composite capped at 40 and a visible warning banner.
+3. **Missing data is never silently scored.** Momentum with < 230 trading
+   days, unreported EBIT/GP, or unscorable earnings yield now exclude the
+   factor, renormalize the remaining weights, display `N/A`, and add a flag
+   (previously momentum silently defaulted to 0 → a fabricated score of 33).
+4. **Edge guards.** Negative enterprise value (cash > market cap) scores
+   earnings yield maximal instead of zero; banks without EBIT fall back to
+   NI/MktCap (flagged); the total-volatility fallback for a failed OLS is
+   flagged; Financial Services carries zero gross-profitability weight.
+5. **Honest labeling.** Every response carries a `methodology` disclosure:
+   factors are scored against fixed reference thresholds, not peer-ranked
+   percentiles.
+
+**Backlog (council-recommended upgrade):** replace fixed anchors with
+cross-sectional percentile ranks against a cached S&P 500 factor snapshot
+(nightly yfinance pull), displayed as "Xth percentile vs. sector" with
+academic citations.
