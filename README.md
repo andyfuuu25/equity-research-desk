@@ -22,8 +22,6 @@ evaluation — built entirely on free data sources and free-tier APIs.
 The report masthead shows the **live share price with day change**, and an
 **interactive 1-year price chart** sits above the sections — range toggles
 (1M/3M/6M/1Y), an indexed **vs S&P 500** overlay, and a crosshair tooltip.
-Chart colors are validated for colorblind separation and contrast on both
-the dark and light themes.
 
 **Engineering highlights**
 
@@ -81,13 +79,15 @@ Double-click **`launch.bat`**. It will:
 4. Install any missing dependencies (first run only)
 5. Start both servers and open the app at <http://localhost:3000>
 
-The launcher window stays open while the app runs. **Press any key in it to
+The launcher window stays open while the app runs. **Press q to
 stop the app** — it shuts both servers down and, if a key is saved on disk,
 asks whether to **wipe it** on the way out (default: keep).
 
 ## Manual setup
 
 **Prerequisites:** Python 3.12+ · Node.js 20.9+
+
+Get your GEMINI API Key [here](https://aistudio.google.com/apikey) for free.
 
 ```bash
 # Backend
