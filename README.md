@@ -93,7 +93,8 @@ asks whether to **wipe it** on the way out (default: keep).
 # Backend
 cd backend
 pip install -r requirements.txt
-cp .env.example .env        # add your keys (see Configuration)
+cp .env.example .env        
+# Add your keys to the .env (see Configuration)
 python -m uvicorn main:app --port 8000
 
 # Frontend (second terminal)
