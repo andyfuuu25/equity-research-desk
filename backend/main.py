@@ -51,32 +51,45 @@ async def generate_report(request: ReportRequest):
     ticker = validate_ticker(request.ticker)
 
     # Validate ticker existence FIRST (one cheap yfinance call) so an invalid
-    # ticker never burns the Alpha Vantage daily quota or an LLM request.
+    # ticker never burns the Alpha Vantage daily quota or an LLM request. The
+    # raw info dict rides along and feeds the evaluation metrics and the quant
+    # model, so .info is fetched exactly once per report.
     company_info = await asyncio.to_thread(fetch_company_info, ticker)
     if company_info is None:
         raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found")
+    raw_info = company_info.pop("_info")
 
-    # All remaining fetches are blocking I/O — run them in worker threads,
-    # in parallel, so the event loop stays free and latency is the max of the
-    # branches rather than their sum (SPEC §9.2).
+    # Remaining fetches are blocking I/O — run them in worker threads, in
+    # parallel, so latency is the max of the branches, not their sum (§9.2).
     pipeline_task = asyncio.create_task(asyncio.to_thread(fetch_pipeline_data, ticker))
-    eval_task = asyncio.create_task(asyncio.to_thread(fetch_evaluation_data, ticker, None))
-    quant_task = asyncio.create_task(asyncio.to_thread(_evaluator.evaluate_ticker, ticker))
     price_task = asyncio.create_task(asyncio.to_thread(fetch_price_bundle, ticker))
 
+    # Pure shaping of the already-fetched info — no network, no thread.
+    eval_data = fetch_evaluation_data(raw_info)
+
+    # The quant model reuses the shared info dict and the price bundle's close
+    # series (its only other needs are the annual statements, fetched inside).
+    price_bundle = await price_task
+    quant_task = asyncio.create_task(
+        asyncio.to_thread(
+            _evaluator.evaluate_ticker,
+            ticker,
+            raw_info,
+            price_bundle["_closes"],
+            price_bundle["_spy_closes"],
+        )
+    )
+
     # The LLM call needs pipeline data — start it the moment that arrives,
-    # while the evaluation/quant branches are still running.
+    # while the quant branch is still running.
     pipeline_data = await pipeline_task
     llm_task = asyncio.create_task(
         asyncio.to_thread(generate_report_sections, company_info, pipeline_data)
     )
 
-    eval_data, quant_result, price_bundle = await asyncio.gather(
-        eval_task, quant_task, price_task
-    )
-    # News sentiment reuses the already-fetched articles (no extra API call),
-    # and price performance reuses the chart's history download (one pair of
-    # yfinance history calls serves the table, the quote, and the chart).
+    quant_result = await quant_task
+    # News sentiment reuses the already-fetched articles (no extra API call);
+    # price performance reuses the bundle's history download.
     eval_data["news_sentiment"] = compute_news_sentiment(pipeline_data["articles"])
     perf = price_bundle["performance"]
     eval_data.update({

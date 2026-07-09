@@ -155,9 +155,9 @@ Risk Events:
 - Missing or unscorable factors (short price history, unreported EBIT/GP, negative EV) are excluded with a visible flag and the remaining weights renormalize — missing data is never silently scored
 - Banks/insurers without EBIT fall back to Net Income / Market Cap for earnings yield (flagged)
 - Earnings-quality warning: if Sloan accruals > +0.15 (net income far ahead of operating cash flow), status becomes FLAGGED and the composite is capped at 40 — a tilt with a warning banner, not a veto
-- Returns: `status` (PASSED / FLAGGED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`, `flags`, `methodology`
-- Scores use fixed reference thresholds (not peer-ranked percentiles); this is disclosed in the UI via the `methodology` string
-- Data fetched independently by the evaluator via yfinance (financials, balance sheet, cashflow, price history)
+- Returns: `status` (PASSED / FLAGGED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`, `flags`, `methodology`, and — in percentile mode — `factor_percentiles` + `benchmark`
+- Primary scoring: sector-relative percentile ranks vs. the S&P 500 factor snapshot (see v0.4 addendum); falls back to fixed reference thresholds when the snapshot is missing/stale. Either way the `methodology` string discloses the mode in the UI
+- Shares the report's single yfinance `.info` lookup and price-history pair (passed in by the orchestrator); fetches independently only when run standalone. Annual statements are fetched by the evaluator itself
 
 **LLM task:** None — Section 3 does not use LLM generation. All output is derived directly from data.
 
@@ -482,4 +482,61 @@ unanimous verdict) drove the following corrections to `evaluator.py`:
 **Backlog (council-recommended upgrade):** replace fixed anchors with
 cross-sectional percentile ranks against a cached S&P 500 factor snapshot
 (nightly yfinance pull), displayed as "Xth percentile vs. sector" with
-academic citations.
+academic citations. *Implemented in v0.4 — see below.*
+
+## Addendum — Cross-sectional percentile ranking (v0.4, 2026-07-09)
+
+The council's remaining recommendation is implemented:
+
+1. **Factor snapshot** (`build_universe.py`). Computes the same five factors
+   for all ~503 S&P 500 constituents: two bulk price downloads (momentum,
+   idiosyncratic vol) plus threaded per-ticker fundamentals mirroring the
+   evaluator's rules (NI/MktCap fallback for banks). Writes
+   `universe_snapshot.json` (git-ignored). Resilient to yfinance throttling:
+   cooldown retry pass + backfill of still-missing fundamentals from the
+   previous snapshot. Constituents bundled in `sp500_constituents.json`
+   (Wikipedia-sourced, GICS→yfinance sector mapping for fallback).
+2. **Percentile scoring** (`universe.py` + `evaluator.py`). With a fresh
+   snapshot (≤30 days), each factor is scored as a midrank percentile
+   against the stock's yfinance-sector cohort (min 20 names, else full
+   index). Lower-is-better factors (accruals, idio vol) are inverted so 100
+   is always good. The composite is the renormalized sector-weighted blend
+   of percentiles; the FLAGGED accruals cap still applies. Missing/stale
+   snapshot → fixed-threshold fallback, stated in the `methodology` string.
+3. **API additions**: `factor_percentiles` (display-key → 0-100 rank) and
+   `benchmark` (cohort description with snapshot date), only present in
+   percentile mode.
+4. **UI**: each factor cell shows "Nth pctile" under the raw value, with a
+   benchmark caption and factor pedigree line (Greenblatt · Jegadeesh &
+   Titman 1993 · Novy-Marx 2013 · Sloan 1996 · Ang et al. 2006).
+
+Known limits (disclosed by design): yfinance snapshots are not
+point-in-time and carry survivorship bias; fundamentals mix statement dates
+across the universe. Acceptable for a research tool; noted here rather than
+hidden.
+
+## Addendum — Fetch deduplication & cleanup (v0.5, 2026-07-09)
+
+A redundancy audit of the report pipeline found the same data fetched up to
+three times per request. Corrections:
+
+1. **One `.info` lookup per report.** `fetch_company_info` returns the raw
+   yfinance info dict alongside the shaped profile; the orchestrator feeds
+   it to the evaluation metrics (`fetch_evaluation_data` is now a pure
+   formatter with no network) and the quant model. Previously fetched 3×.
+2. **One price-history pair per report.** `fetch_price_bundle` exposes its
+   close series (`_closes`/`_spy_closes`, private keys never serialized) and
+   the quant model consumes them for momentum and the market-model
+   regression. Previously the ticker's 1y history was fetched twice and two
+   different benchmarks were fetched (^GSPC and SPY).
+3. **Benchmark standardized on SPY** across the evaluator, the price bundle,
+   and the universe snapshot, so single-name idiosyncratic vol and snapshot
+   percentiles are computed against the same series.
+4. **Dead code removed:** `llm.generate_evaluation()` (Section 3 has been
+   LLM-free since session 3; the function was never called and still
+   referenced the retired REJECTED status).
+
+Net effect: 5 fewer yfinance calls per report (~40%), which matters after
+observed rate-limiting (429s) on the keyless source. `evaluate_ticker`
+still self-fetches when data isn't supplied, so standalone use and scripts
+keep working.

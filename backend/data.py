@@ -24,6 +24,10 @@ def _fmt_pct(value) -> str:
 
 
 def fetch_company_info(ticker: str) -> dict | None:
+    """Identity/scale profile for the LLM prompt, plus the raw yfinance info
+    dict under ``"_info"`` so downstream consumers (evaluation metrics, quant
+    model) reuse this one lookup instead of refetching. The caller pops
+    ``"_info"`` before the dict reaches the prompt or the API response."""
     stock = yf.Ticker(ticker)
     info = stock.info
 
@@ -32,6 +36,7 @@ def fetch_company_info(ticker: str) -> dict | None:
         return None
 
     return {
+        "_info": info,
         # Identity
         "company": info.get("longName") or info.get("shortName", ticker),
         "ticker": ticker,
@@ -55,7 +60,6 @@ def fetch_company_info(ticker: str) -> dict | None:
 def _fmt_date(raw: str) -> str:
     """Convert AV timestamp 'YYYYMMDDTHHMMSS' to readable 'Month D, YYYY'."""
     try:
-        from datetime import datetime
         return datetime.strptime(raw[:8], "%Y%m%d").strftime("%B %d, %Y")
     except Exception:
         return raw[:8]
@@ -204,8 +208,11 @@ def fetch_price_bundle(ticker: str) -> dict:
     Returns ``{"performance": ..., "quote": ..., "chart": ...}`` so the
     relative-performance table, the masthead quote, and the price chart all
     share a single pair of yfinance history calls instead of refetching.
+    The raw close series ride along under ``"_closes"`` / ``"_spy_closes"``
+    for the quant evaluator (momentum + market-model regression) — private
+    keys, never serialized into the API response.
     """
-    empty = {"performance": {}, "quote": None, "chart": None}
+    empty = {"performance": {}, "quote": None, "chart": None, "_closes": None, "_spy_closes": None}
     try:
         stock_hist = yf.Ticker(ticker).history(period="1y")
         spy_hist = yf.Ticker("SPY").history(period="1y")
@@ -265,7 +272,13 @@ def fetch_price_bundle(ticker: str) -> dict:
         for d, c in zip(stock_hist.index, closes)
     ]
 
-    return {"performance": performance, "quote": quote, "chart": {"points": points}}
+    return {
+        "performance": performance,
+        "quote": quote,
+        "chart": {"points": points},
+        "_closes": closes,
+        "_spy_closes": spy_hist["Close"] if not spy_hist.empty else None,
+    }
 
 
 def compute_news_sentiment(articles: list) -> str:
@@ -286,19 +299,10 @@ def compute_news_sentiment(articles: list) -> str:
     return "Neutral"
 
 
-def fetch_evaluation_data(
-    ticker: str,
-    articles: list | None = None,
-    price_perf: dict | None = None,
-) -> dict:
-    """Valuation/growth/sentiment metrics. ``price_perf`` comes from
-    fetch_price_bundle()["performance"] — supplied by the caller so the
-    price history is downloaded once per report, not once per consumer."""
-    try:
-        info = yf.Ticker(ticker).info
-    except Exception:
-        info = {}
-
+def fetch_evaluation_data(info: dict) -> dict:
+    """Valuation/growth/sentiment metrics shaped from an already-fetched
+    yfinance info dict (no network). Price performance and news sentiment
+    are merged in by the caller once those branches complete."""
     trailing_pe = info.get("trailingPE")
     price_to_sales = info.get("priceToSalesTrailing12Months")
     ev_to_ebitda = info.get("enterpriseToEbitda")
@@ -313,8 +317,6 @@ def fetch_evaluation_data(
     target_low = info.get("targetLowPrice")
     num_analysts = info.get("numberOfAnalystOpinions")
 
-    price_perf = price_perf or {}
-
     return {
         "trailing_pe": f"{trailing_pe:.1f}" if trailing_pe else "N/A",
         "price_to_sales": f"{price_to_sales:.1f}" if price_to_sales else "N/A",
@@ -324,19 +326,11 @@ def fetch_evaluation_data(
         "revenue_growth": _fmt_pct(info.get("revenueGrowth")),
         "gross_margin": _fmt_pct(info.get("grossMargins")),
         "net_margin": _fmt_pct(info.get("profitMargins")),
-        "price_1w": price_perf.get("1w", "N/A"),
-        "price_1m": price_perf.get("1m", "N/A"),
-        "price_3m": price_perf.get("3m", "N/A"),
-        "price_ytd": price_perf.get("ytd", "N/A"),
-        "spy_1w": price_perf.get("spy_1w", "N/A"),
-        "spy_1m": price_perf.get("spy_1m", "N/A"),
-        "spy_3m": price_perf.get("spy_3m", "N/A"),
-        "spy_ytd": price_perf.get("spy_ytd", "N/A"),
         "recommendation": rec_key.replace("_", " ").title() if rec_key != "N/A" else "N/A",
         "target_mean": f"${target_mean:.2f}" if target_mean else "N/A",
         "target_high": f"${target_high:.2f}" if target_high else "N/A",
         "target_low": f"${target_low:.2f}" if target_low else "N/A",
         "num_analysts": str(num_analysts) if num_analysts else "N/A",
         "short_float": f"{short_float * 100:.1f}%" if short_float else "N/A",
-        "news_sentiment": compute_news_sentiment(articles or []),
+        "news_sentiment": "N/A",
     }

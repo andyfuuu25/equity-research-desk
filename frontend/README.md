@@ -21,7 +21,7 @@ components/
 ├─ Report.tsx               # Client shell: fetch, skeletons, error states
 ├─ ExecutiveSummary.tsx     # Section 01
 ├─ FuturePipeline.tsx       # Section 02 (bucket-coded catalysts)
-├─ Evaluation.tsx           # Section 03 (quant badge, metrics, PT range)
+├─ Evaluation.tsx           # Section 03 (quant badge, factor percentiles, metrics, PT range)
 ├─ PriceChart.tsx           # 1Y price chart: range toggles, SPY overlay, crosshair
 └─ ThemeToggle.tsx          # Light/dark switch (persisted in localStorage)
 ```
