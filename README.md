@@ -114,7 +114,6 @@ See [backend/.env.example](backend/.env.example).
 | `GEMINI_API_KEY` | **Yes** | Google Gemini key for report generation. Free at [AI Studio](https://aistudio.google.com/apikey). |
 | `ALPHA_VANTAGE_API_KEY` | No | Adds sentiment-tagged news. Without it, headlines load from Yahoo Finance keylessly. Free at [alphavantage.co](https://www.alphavantage.co/support/#api-key). |
 | `GEMINI_MODEL` | No | Override the primary model (default `gemini-2.5-flash`). |
-| `NEXT_PUBLIC_API_URL` | No | Frontend → backend base URL (default `http://localhost:8000`). |
 
 ---
 
@@ -125,22 +124,11 @@ open source, and both external APIs run on free tiers that require **no
 credit card** — when a quota is exhausted, requests fail with an error;
 you are never billed.
 
-| Service | Free-tier limit | Card required | Overage behavior |
-|---|---|---|---|
-| Gemini `gemini-2.5-flash` | ~20 requests/day | No | 429 error → app auto-falls back ↓ |
-| Gemini `gemini-2.0-flash` (fallback) | ~1,500 requests/day | No | 429 error, no charge |
-| Alpha Vantage | 25 requests/day | No | Empty response → Yahoo fallback |
-| Yahoo Finance (via `yfinance`) | Unmetered, keyless | No | — |
-
-Each report consumes exactly **1 Gemini request** and **at most 1 Alpha
-Vantage request**.
 
 > ⚠️ The only way this project can ever cost money is if you attach a billing
 > account to your Google Cloud project yourself. A plain AI Studio key has no
 > billing attached — keep it that way and you cannot be charged.
 
-> **Data note:** `yfinance` uses Yahoo Finance's public endpoints, which is
-> fine for personal research but not licensed for commercial redistribution.
 
 ---
 
@@ -191,24 +179,6 @@ Errors: `400` invalid ticker format · `404` unknown ticker ·
 
 ---
 
-## Security & privacy
-
-- **Secrets never enter version control.** `.gitignore` blocks `.env` and all
-  variants (`.env.*`); only the empty `.env.example` template is committed.
-- **Session-only key mode**: decline saving at the launcher prompt and keys
-  exist purely as process environment variables — wiped when the server
-  windows close, nothing written to disk.
-- **Exit-time wipe**: even with a saved key, the launcher offers to delete
-  `backend\.env` every time you shut the app down from its window.
-- **Keys stay local.** They are sent only to Google / Alpha Vantage over
-  HTTPS, never logged, and never returned by any API response.
-- CORS is locked to `http://localhost:3000`.
-
-Before publishing a fork, run a final check that nothing sensitive is staged:
-`git status` should never list `backend/.env`.
-
----
-
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -221,15 +191,5 @@ Before publishing a fork, run a final check that nothing sensitive is staged:
 
 ---
 
-## Roadmap
-
-- [ ] Server-sent events — stream sections to the browser as they complete
-- [ ] SEC EDGAR 8-K ingestion for the Future Pipeline section
-- [ ] Multi-ticker regression test suite across sectors
-- [ ] Structured logging & per-section latency metrics
-
 ## License
-
-No license has been selected yet. Until one is added, all rights are
-reserved by the authors — choose a license (e.g. MIT) before accepting
-external contributions.
+All licenses in this repository are copyrighted by their respective authors.
