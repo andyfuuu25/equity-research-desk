@@ -39,6 +39,9 @@ the dark and light themes.
   regenerated once on failure before accepting a best-effort parse.
 - **Parallel data pipeline** — all market-data fetches, the quant model, and
   the LLM call run concurrently; typical report time is 8–15 seconds.
+- **Deduplicated fetching** — one `.info` lookup and one price-history pair
+  per report feed the profile, metrics, quote, chart, performance table, and
+  quant model, minimizing rate-limit exposure on the keyless data source.
 - **Quota-safe validation** — invalid tickers are rejected by one cheap lookup
   before any rate-limited API is touched.
 
@@ -160,11 +163,14 @@ Notes:
     ▼
 [FastAPI backend]      :8000
     │
-    ├─► Data layer (parallel)
+    ├─► Data layer (parallel; one .info lookup + one price-history
+    │   │            pair shared across every consumer)
     │     ├─ yfinance ─────── fundamentals, calendar, price history
     │     ├─ Alpha Vantage ── news + sentiment  (optional key)
     │     │     └─ fallback: Yahoo Finance headlines (no key)
-    │     └─ Quant model ──── 5-factor institutional evaluator
+    │     └─ Quant model ──── 5-factor evaluator, percentile-ranked
+    │           └─ universe_snapshot.json (S&P 500 factor snapshot,
+    │              built offline by build_universe.py)
     │
     └─► LLM layer
           └─ Gemini (single merged call → Sections 1 & 2,
@@ -263,6 +269,8 @@ Vantage request**.
 {
   "ticker": "NVDA",
   "generated_at": "2026-07-08T21:30:00+00:00",
+  "quote": { "price": 204.12, "change": 7.19, "change_pct": 3.65 },
+  "chart": { "points": [ { "date": "2025-07-09", "close": 159.34, "spy": 620.45 } ] },  // ~252 daily closes
   "executive_summary": { "company": "...", "sector": "...", "industry": "...", "body": "..." },
   "future_pipeline":   { "earnings_date": "2026-08-27", "body": "..." },
   "evaluation": {

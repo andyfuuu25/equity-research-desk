@@ -71,7 +71,9 @@ def price_factors(symbols):
     )["Close"]
     if isinstance(closes, pd.Series):  # single-symbol runs
         closes = closes.to_frame(symbols[0])
-    bench = yf.download("^GSPC", period="1y", auto_adjust=True, progress=False)[
+    # SPY, matching the evaluator's market-model benchmark, so snapshot and
+    # single-name idiosyncratic vol are computed against the same series.
+    bench = yf.download("SPY", period="1y", auto_adjust=True, progress=False)[
         "Close"
     ].squeeze()
     bench_ret = bench.pct_change().dropna()

@@ -8,7 +8,9 @@ import universe
 
 class InstitutionalStockEvaluator:
 
-    def __init__(self, benchmark_ticker="^GSPC"):
+    def __init__(self, benchmark_ticker="SPY"):
+        # SPY (not ^GSPC) so the market-model regression can reuse the report's
+        # existing benchmark download; the universe snapshot uses SPY too.
         self.benchmark_ticker = benchmark_ticker
         self.sector_matrix = {
             "Technology": {
@@ -50,10 +52,15 @@ class InstitutionalStockEvaluator:
                     return float(val)
         return None
 
-    def evaluate_ticker(self, ticker_symbol):
+    def evaluate_ticker(self, ticker_symbol, info=None, stock_closes=None, bench_closes=None):
+        """Score one ticker. ``info``, ``stock_closes`` and ``bench_closes``
+        accept already-fetched data (the report pipeline shares one yfinance
+        info lookup and one price-history pair across all sections); each is
+        fetched here only when not supplied, so standalone use still works."""
         ticker = yf.Ticker(ticker_symbol)
         try:
-            info = ticker.info
+            if info is None:
+                info = ticker.info
             sector = info.get("sector", "Unknown")
             market_cap = info.get("marketCap")
             ev = info.get("enterpriseValue") or market_cap
@@ -87,8 +94,16 @@ class InstitutionalStockEvaluator:
             return {"status": "FAILED", "reason": f"Missing accounting variables: {missing_fields}"}
 
         try:
-            hist_stock = ticker.history(period="1y")["Close"]
-            hist_bench = yf.Ticker(self.benchmark_ticker).history(period="1y")["Close"]
+            hist_stock = (
+                stock_closes
+                if stock_closes is not None
+                else ticker.history(period="1y")["Close"]
+            )
+            hist_bench = (
+                bench_closes
+                if bench_closes is not None
+                else yf.Ticker(self.benchmark_ticker).history(period="1y")["Close"]
+            )
             combined_returns = pd.concat(
                 [hist_stock.pct_change(), hist_bench.pct_change()], axis=1, join="inner"
             ).dropna()
@@ -97,6 +112,9 @@ class InstitutionalStockEvaluator:
             return {"status": "FAILED", "reason": f"Historical pricing failure: {str(e)}"}
 
         flags = []
+        config = self.sector_matrix.get(sector, self.base_weights)
+        weights = config["weights"]
+        regime_label = config["label"]
 
         # Earnings yield (Greenblatt). Negative EV means cash exceeds market
         # cap — the cheapest configuration possible, not a data failure.
@@ -139,8 +157,7 @@ class InstitutionalStockEvaluator:
         else:
             gross_profitability = None
             gp_score = None
-            config_gp = self.sector_matrix.get(sector, self.base_weights)["weights"]["gp"]
-            if config_gp > 0:
+            if weights["gp"] > 0:
                 flags.append(
                     "Gross profit not reported: profitability factor excluded and weights renormalized."
                 )
@@ -161,10 +178,6 @@ class InstitutionalStockEvaluator:
                 "Market-model regression unavailable: total volatility substituted for idiosyncratic volatility (conservative)."
             )
         idio_score = float(np.clip((0.40 - idiosyncratic_vol) / 0.30, 0, 1) * 100)
-
-        config = self.sector_matrix.get(sector, self.base_weights)
-        weights = config["weights"]
-        regime_label = config["label"]
 
         factor_scores = {
             "ey": ey_score,

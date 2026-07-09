@@ -155,9 +155,9 @@ Risk Events:
 - Missing or unscorable factors (short price history, unreported EBIT/GP, negative EV) are excluded with a visible flag and the remaining weights renormalize — missing data is never silently scored
 - Banks/insurers without EBIT fall back to Net Income / Market Cap for earnings yield (flagged)
 - Earnings-quality warning: if Sloan accruals > +0.15 (net income far ahead of operating cash flow), status becomes FLAGGED and the composite is capped at 40 — a tilt with a warning banner, not a veto
-- Returns: `status` (PASSED / FLAGGED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`, `flags`, `methodology`
-- Scores use fixed reference thresholds (not peer-ranked percentiles); this is disclosed in the UI via the `methodology` string
-- Data fetched independently by the evaluator via yfinance (financials, balance sheet, cashflow, price history)
+- Returns: `status` (PASSED / FLAGGED / FAILED), `composite_score`, `regime_applied`, `raw_metrics`, `allocation_weights`, `flags`, `methodology`, and — in percentile mode — `factor_percentiles` + `benchmark`
+- Primary scoring: sector-relative percentile ranks vs. the S&P 500 factor snapshot (see v0.4 addendum); falls back to fixed reference thresholds when the snapshot is missing/stale. Either way the `methodology` string discloses the mode in the UI
+- Shares the report's single yfinance `.info` lookup and price-history pair (passed in by the orchestrator); fetches independently only when run standalone. Annual statements are fetched by the evaluator itself
 
 **LLM task:** None — Section 3 does not use LLM generation. All output is derived directly from data.
 
@@ -514,3 +514,29 @@ Known limits (disclosed by design): yfinance snapshots are not
 point-in-time and carry survivorship bias; fundamentals mix statement dates
 across the universe. Acceptable for a research tool; noted here rather than
 hidden.
+
+## Addendum — Fetch deduplication & cleanup (v0.5, 2026-07-09)
+
+A redundancy audit of the report pipeline found the same data fetched up to
+three times per request. Corrections:
+
+1. **One `.info` lookup per report.** `fetch_company_info` returns the raw
+   yfinance info dict alongside the shaped profile; the orchestrator feeds
+   it to the evaluation metrics (`fetch_evaluation_data` is now a pure
+   formatter with no network) and the quant model. Previously fetched 3×.
+2. **One price-history pair per report.** `fetch_price_bundle` exposes its
+   close series (`_closes`/`_spy_closes`, private keys never serialized) and
+   the quant model consumes them for momentum and the market-model
+   regression. Previously the ticker's 1y history was fetched twice and two
+   different benchmarks were fetched (^GSPC and SPY).
+3. **Benchmark standardized on SPY** across the evaluator, the price bundle,
+   and the universe snapshot, so single-name idiosyncratic vol and snapshot
+   percentiles are computed against the same series.
+4. **Dead code removed:** `llm.generate_evaluation()` (Section 3 has been
+   LLM-free since session 3; the function was never called and still
+   referenced the retired REJECTED status).
+
+Net effect: 5 fewer yfinance calls per report (~40%), which matters after
+observed rate-limiting (429s) on the keyless source. `evaluate_ticker`
+still self-fetches when data isn't supplied, so standalone use and scripts
+keep working.
