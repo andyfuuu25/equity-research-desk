@@ -25,12 +25,14 @@ interface EvaluationMetrics {
 }
 
 interface QuantResult {
-  status: "PASSED" | "REJECTED" | "FAILED";
+  status: "PASSED" | "FLAGGED" | "FAILED";
   sector?: string;
   regime_applied?: string;
   composite_score?: number;
   allocation_weights?: Record<string, number>;
-  raw_metrics?: Record<string, number>;
+  raw_metrics?: Record<string, number | string>;
+  flags?: string[];
+  methodology?: string;
   reason?: string;
 }
 
@@ -107,14 +109,14 @@ function QuantBadge({ quant }: { quant: QuantResult }) {
   const frame =
     quant.status === "PASSED"
       ? "border-gain-dim"
-      : quant.status === "REJECTED"
-      ? "border-loss-dim"
+      : quant.status === "FLAGGED"
+      ? "border-gold-dim"
       : "border-line-strong";
   const statusTone =
     quant.status === "PASSED"
       ? "text-gain"
-      : quant.status === "REJECTED"
-      ? "text-loss"
+      : quant.status === "FLAGGED"
+      ? "text-gold"
       : "text-paper-mute";
 
   return (
@@ -126,16 +128,17 @@ function QuantBadge({ quant }: { quant: QuantResult }) {
           </p>
           <p className={`mt-1 text-sm font-semibold ${statusTone}`}>
             {quant.status === "PASSED" && (quant.regime_applied ?? "Passed")}
-            {quant.status === "REJECTED" && "Rejected — Earnings Quality Flag"}
+            {quant.status === "FLAGGED" &&
+              `${quant.regime_applied ?? "Scored"} — Earnings Quality Flag`}
             {quant.status === "FAILED" && "Insufficient data for scoring"}
           </p>
-          {quant.status === "REJECTED" && quant.reason && (
+          {quant.status === "FAILED" && quant.reason && (
             <p className="mt-1 max-w-md text-xs leading-relaxed text-paper-dim">
               {quant.reason}
             </p>
           )}
         </div>
-        {quant.status === "PASSED" && quant.composite_score !== undefined && (
+        {quant.status !== "FAILED" && quant.composite_score !== undefined && (
           <div className="shrink-0 text-right">
             <p className={`tnum font-mono text-4xl font-bold ${statusTone}`}>
               {quant.composite_score}
@@ -146,6 +149,16 @@ function QuantBadge({ quant }: { quant: QuantResult }) {
           </div>
         )}
       </div>
+
+      {quant.flags && quant.flags.length > 0 && (
+        <ul className="mt-3 space-y-1 border-t border-line pt-3">
+          {quant.flags.map((f) => (
+            <li key={f} className="text-xs leading-relaxed text-gold">
+              ⚠ {f}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {quant.raw_metrics && (
         <div className="mt-4 grid grid-cols-2 gap-4 border-t border-line pt-4 sm:grid-cols-5">
@@ -161,6 +174,12 @@ function QuantBadge({ quant }: { quant: QuantResult }) {
             </div>
           ))}
         </div>
+      )}
+
+      {quant.methodology && (
+        <p className="mt-3 text-[11px] leading-relaxed text-paper-mute">
+          {quant.methodology}
+        </p>
       )}
     </div>
   );
