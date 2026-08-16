@@ -7,7 +7,7 @@ evaluation — built entirely on free data sources and free-tier APIs.
 
 > **Disclaimer** — This software produces automated research summaries for
 > educational purposes only. Nothing it generates is investment advice or a
-> recommendation to buy or sell any security.
+> recommendation to buy or sell any security. 
 
 ---
 
@@ -316,5 +316,5 @@ Errors: `400` invalid ticker format · `404` unknown ticker ·
 
 ---
 
-## License
+## License 
 All licenses in this repository are copyrighted by their respective authors.
