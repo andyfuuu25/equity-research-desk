@@ -1,5 +1,7 @@
 # Equity Research Desk
 
+"Disclaimer: All research, company evaluations, and code repositories contained here were created independently for educational purposes during my time as a student. These reports represent historical academic exercises, are completely static, and are not actively maintained. They do not constitute investment advice and do not reflect the views, strategies, or opinions of my current employer."
+
 On-demand, analyst-style research profiles for US-listed equities. Enter a
 ticker and receive a live-generated report combining plain-English business
 analysis, forward-looking catalysts, and a five-factor quantitative
